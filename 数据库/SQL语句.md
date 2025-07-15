@@ -127,3 +127,27 @@ SELECT * FROM mytable LIMIT 0, 5;
 -- 返回第 3 ~ 5 行
 SELECT * FROM mytable LIMIT 2, 3;
 ```
+
+
+## 触发器
+
+发器是数据库中一种特殊的存储过程，它会在特定的数据库操作（如 INSERT、UPDATE 或 DELETE）发生时自动执行。触发器通常用于实现数据完整性约束、记录审计日志或自动执行相关操作。
+
+```sql
+CREATE TRIGGER trigger_name
+BEFORE/AFTER INSERT/UPDATE/DELETE ON table_name
+FOR EACH ROW
+BEGIN
+    -- 触发器逻辑
+END;
+```
+```sql
+-- 创建一个触发器，在插入新记录时自动设置 created_at 字段为当前时间
+CREATE TRIGGER set_created_at
+BEFORE INSERT ON mytable
+FOR EACH ROW
+BEGIN
+    SET NEW.created_at = NOW();
+END;
+```
+
