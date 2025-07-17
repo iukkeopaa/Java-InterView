@@ -1398,3 +1398,453 @@ sql
 - row_id用完
 
 如果表没有设置主键，InnoDB 会自动创建一个全局隐藏的 row_id，其长度为 6 个字节，当 row_id 达到上限后，它的执行流程和主键 ID 不同，它是再次归零，然后重新递增，如果出现相同的 row_id，后面的数据会覆盖之前的数据
+
+
+
+## 如何在千万级别的Mysql表中如何高效添加一个新的列
+### 一、使用 `ALGORITHM=INPLACE` 和 `LOCK=NONE`（MySQL 5.6+）
+
+**核心原理**：
+MySQL 5.6+ 引入了 Online DDL 功能，通过 `INPLACE` 算法避免重建整个表，仅修改元数据。使用 `LOCK=NONE` 允许在操作期间继续读写表。
+
+**示例语法**：
+
+sql
+
+
+
+
+
+
+
+
+
+
+
+```sql
+ALTER TABLE table_name
+ADD COLUMN new_column INT DEFAULT 0,
+ALGORITHM=INPLACE,
+LOCK=NONE;
+```
+
+**适用条件**：
+
+- 列允许 `NULL` 或设置了 `DEFAULT` 值（否则需全量更新数据）。
+- 对于非 `NULL` 且无默认值的列，MySQL 会隐式锁表并填充 `0` 或空字符串。
+
+**注意事项**：
+
+- 若表存在 `FULLTEXT` 索引，可能降级为 `COPY` 算法（需重建表）。
+- 执行前需确认可用磁盘空间充足（约为表大小的 20%）。
+
+### 二、使用 `pt-online-schema-change`（Percona Toolkit）
+
+**核心原理**：
+通过创建影子表（Shadow Table），在原表上触发触发器同步数据，最后切换表名。整个过程对应用透明，仅在切换时短暂锁表。
+
+**操作步骤**：
+
+1. **安装工具**：
+
+   bash
+
+
+
+
+
+
+
+
+
+
+
+   ```bash
+   yum install percona-toolkit  # CentOS/RHEL
+   apt-get install percona-toolkit  # Ubuntu/Debian
+   ```
+
+2. **执行命令**：
+
+   bash
+
+
+
+
+
+
+
+
+
+
+
+   ```bash
+   pt-online-schema-change \
+   --alter "ADD COLUMN new_column INT DEFAULT 0" \
+   D=db_name,t=table_name \
+   --user=username \
+   --password=password \
+   --execute
+   ```
+
+**优点**：
+
+- 完全在线操作，对业务影响极小。
+- 自动处理触发器和索引，支持大表操作。
+
+**缺点**：
+
+- 需要额外的磁盘空间（约为原表大小）。
+- 同步期间会增加主从复制延迟。
+
+### 三、分批次导入数据（适用于复杂场景）
+
+**核心原理**：
+将大表按主键范围拆分，逐批处理并导入新表，最后替换原表。
+
+**操作步骤**：
+
+1. **创建临时表**：
+
+   sql
+
+
+
+
+
+
+
+
+
+
+
+   ```sql
+   CREATE TABLE new_table LIKE old_table;
+   ALTER TABLE new_table ADD COLUMN new_column INT DEFAULT 0;
+   ```
+
+2. **分批次复制数据**：
+
+   sql
+
+
+
+
+
+
+
+
+
+
+
+   ```sql
+   -- 示例：每次复制10万行
+   INSERT INTO new_table 
+   SELECT * FROM old_table 
+   WHERE id BETWEEN start_id AND end_id;
+   ```
+
+3. **切换表名**：
+
+   sql
+
+
+
+
+
+
+
+
+
+
+
+   ```sql
+   RENAME TABLE old_table TO old_table_backup, new_table TO old_table;
+   ```
+
+**优化建议**：
+
+- 使用事务包裹每批数据，确保原子性。
+- 复制期间监控数据库负载，避免影响业务。
+
+### 四、预创建列（设计阶段优化）
+
+**最佳实践**：
+在表设计阶段预留扩展列（如 `extra_data JSON`），避免后期频繁修改表结构。
+
+sql
+
+
+
+
+
+
+
+
+
+
+
+```sql
+CREATE TABLE users (
+  id BIGINT PRIMARY KEY,
+  name VARCHAR(100),
+  extra_data JSON  -- 预留字段，存储动态扩展属性
+);
+```
+
+### 五、对比与选择建议
+
+| 方法                      | 适用场景               | 优点               | 缺点                       |
+| ------------------------- | ---------------------- | ------------------ | -------------------------- |
+| `ALGORITHM=INPLACE`       | 简单列添加（有默认值） | 快速，无需额外空间 | 可能短暂锁表               |
+| `pt-online-schema-change` | 复杂变更，需完全在线   | 无业务中断         | 需要双倍空间，增加复制延迟 |
+| 分批次导入                | 超大数据量，需精细控制 | 灵活，可暂停恢复   | 操作复杂，耗时长           |
+| 预创建列                  | 设计阶段规划           | 避免后期修改       | 需要预判业务变化           |
+
+### 六、注意事项
+
+1. **备份数据**：无论采用哪种方法，执行前务必备份全量数据。
+2. **选择低峰期操作**：即使是 Online DDL，仍可能对性能产生轻微影响。
+3. **监控资源**：操作期间监控磁盘空间、CPU、内存和复制延迟。
+4. **验证索引**：操作后检查索引是否正常，特别是外键约束。
+
+# ================================
+### 一、利用主从复制架构：从库先行变更，再切换角色
+
+**核心原理**：
+借助主从复制的 “读写分离” 特性，先在从库（非业务主库）执行表结构变更和数据填充，待从库数据与主库一致且变更完成后，切换主从角色（将从库提升为主库），避免直接在主库操作导致的锁表或性能波动。
+
+#### 操作步骤：
+
+1. **确认主从同步状态**
+   确保从库已追上主库的 binlog，避免数据不一致：
+
+   sql
+
+
+
+
+
+
+
+
+
+
+
+   ```sql
+   -- 在从库执行，查看Seconds_Behind_Master是否为0
+   SHOW SLAVE STATUS\G
+   ```
+
+2. **在从库停止同步，执行表结构变更**
+   先暂停从库同步（避免主库新数据干扰变更），添加新列：
+
+   sql
+
+
+
+
+
+
+
+
+
+
+
+   ```sql
+   STOP SLAVE;  -- 停止从库同步
+   ALTER TABLE table_name ADD COLUMN new_column [类型] [默认值];  -- 从库添加新列
+   ```
+
+3. **填充新列数据（如需关联其他表，结合 JOIN）**
+   若新列的值依赖其他表（如从`user_info`表关联`order`表获取用户等级），用`JOIN`批量更新：
+
+   sql
+
+
+
+
+
+
+
+
+
+
+
+   ```sql
+   -- 示例：从关联表user_info同步level到order表的new_column
+   UPDATE order o
+   JOIN user_info u ON o.user_id = u.id
+   SET o.new_column = u.level
+   WHERE o.new_column IS NULL;  -- 避免重复更新
+   ```
+
+（可分批次执行，如按`order.id`范围拆分，每次更新 10 万行，减少锁表时间）
+
+4. **从库重新同步，追平主库数据**
+   变更完成后，重启从库同步，让从库追上主库在变更期间产生的新数据：
+
+   sql
+
+
+
+
+
+
+
+
+
+
+
+   ```sql
+   START SLAVE;
+   -- 再次确认Seconds_Behind_Master为0
+   SHOW SLAVE STATUS\G
+   ```
+
+5. **切换主从角色**
+   通过`VIP`或域名切换，将业务流量切到已完成变更的从库（新主库），原主库降级为从库。
+
+    - 若用`MGR`（MySQL Group Replication），可直接通过`switchover`平滑切换；
+    - 传统主从可通过`pt-table-sync`确保最后一致性，再修改应用连接地址。
+
+#### 适用场景：
+
+- 已有主从架构，且从库可承担临时变更（非核心业务读库）；
+- 新列需要关联其他表数据（需`JOIN`填充），直接在主库做`UPDATE JOIN`会导致大表锁和性能暴跌。
+
+#### 优点：
+
+- 主库全程无变更操作，业务读写不受影响；
+- 从库变更和`JOIN`更新可在低峰期执行，风险可控。
+
+#### 缺点：
+
+- 需主从架构支持，切换过程可能有秒级中断（依赖切换工具）；
+- 若主库在变更期间写入大量数据，从库追同步可能耗时较长。
+
+### 二、“新建表 + JOIN 迁移 + 主从切换” 组合方案
+
+**核心原理**：
+当直接`ALTER`大表风险过高时，可在从库新建目标表（含新列），通过`JOIN`原表和关联表批量迁移数据，再通过主从切换替换原表。
+
+#### 操作步骤：
+
+1. **从库新建目标表（含新列）**
+
+   sql
+
+
+
+
+
+
+
+
+
+
+
+   ```sql
+   -- 从库执行：复制原表结构并添加新列
+   CREATE TABLE new_table LIKE old_table;
+   ALTER TABLE new_table ADD COLUMN new_column [类型];
+   ```
+
+2. **通过 JOIN 批量迁移数据到新表**
+   用`INSERT ... SELECT ... JOIN`从原表和关联表迁移数据，分批次执行：
+
+   sql
+
+
+
+
+
+
+
+
+
+
+
+   ```sql
+   -- 示例：每次迁移id在[start, end]范围的数据，关联user_info表获取new_column值
+   INSERT INTO new_table (col1, col2, ..., new_column)
+   SELECT o.col1, o.col2, ..., u.level  -- 从关联表取new_column的值
+   FROM old_table o
+   JOIN user_info u ON o.user_id = u.id
+   WHERE o.id BETWEEN 1 AND 100000;  -- 分批次，每次10万行
+   ```
+
+3. **同步增量数据**
+   迁移历史数据后，通过触发器或 binlog 解析工具（如 Canal）同步从库在迁移期间产生的增量数据到`new_table`。
+
+4. **验证数据一致性**
+   对比`old_table`和`new_table`的行数、关键字段哈希值，确保数据一致：
+
+   sql
+
+
+
+
+
+
+
+
+
+
+
+   ```sql
+   -- 校验行数
+   SELECT COUNT(*) FROM old_table;
+   SELECT COUNT(*) FROM new_table;
+   
+   -- 校验随机样本
+   SELECT MD5(CONCAT(col1, col2, new_column)) FROM new_table WHERE id = 12345;
+   ```
+
+5. **切换表名并提升从库为主库**
+   从库数据确认无误后，重命名表并切换主从角色：
+
+   sql
+
+
+
+
+
+
+
+
+
+
+
+   ```sql
+   -- 从库执行：原子性重命名，避免锁表
+   RENAME TABLE old_table TO old_table_bak, new_table TO old_table;
+   ```
+
+之后将该从库提升为主库，承接业务流量。
+
+#### 适用场景：
+
+- 新列需要复杂关联逻辑（多表 JOIN），直接`ALTER`+`UPDATE`效率极低；
+- 原表存在碎片或冗余字段，希望借机优化表结构（如调整字段顺序、删除无用列）。
+
+#### 优点：
+
+- 完全避免在原表上执行`ALTER`和大事务`UPDATE`，对主库无影响；
+- 可顺带优化表结构，提升后续查询性能。
+
+#### 缺点：
+
+- 操作步骤较复杂，需严格校验数据一致性；
+- 增量数据同步需额外工具支持，适合有成熟数据同步体系的团队。
+
+### 三、关键注意事项
+
+1. **数据一致性优先**：
+   无论主从切换还是数据迁移，必须通过校验（行数、哈希值、随机抽样）确保新表数据与原表一致，避免业务异常。
+2. **控制批量操作粒度**：
+   分批次执行`JOIN`和`INSERT/UPDATE`时，单次操作行数建议控制在 1 万 - 10 万（根据服务器性能调整），避免长时间占用锁资源。
+3. **回滚方案**：
+   操作前预留回滚通道（如保留原表备份、主从切换前记录原主库信息），一旦出现问题可快速切回。
+4. **监控主从延迟**：
+   从库变更期间需实时监控主从延迟，若延迟过大，可暂停迁移任务，优先让从库追平主库。
