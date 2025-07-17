@@ -930,3 +930,215 @@ select * from 表名 where BINARY 字段名 ='aaa';
 使用varbinary数据类型
 
 数据库中varchar字符串类型是不区分大小写查询的,将varchar改为varbinary类型,再次查询就会使查询的字段区分查询条件大小写
+
+## mysql，给了一个表中，里面有很多重复数据，如何用一条sql把重复的数据一次性清除掉？
+
+### **方法 1：使用`DELETE` + `JOIN`（适用于有唯一标识列的情况）**
+
+假设表结构为 `users(id, name, email)`，其中 `email` 列存在重复值，需保留 `id` 最小的行：
+
+
+
+sql
+
+
+
+
+
+
+
+
+
+
+
+```sql
+DELETE u1
+FROM users u1
+JOIN users u2 
+  ON u1.email = u2.email 
+  AND u1.id > u2.id;
+```
+
+
+
+**解释**：
+
+
+
+- 通过 `JOIN` 自连接找到所有 `email` 相同但 `id` 更大的记录（即非最小 `id` 的重复行）。
+- 删除这些重复行，保留每个组中 `id` 最小的行。
+
+### **方法 2：使用`DELETE` + `WHERE`子查询（适用于无唯一标识列的情况）**
+
+若表中没有唯一标识列（如 `id`），可通过组合字段判断重复：
+
+
+
+sql
+
+
+
+
+
+
+
+
+
+
+
+```sql
+DELETE FROM users
+WHERE (name, email) IN (
+    SELECT name, email
+    FROM users
+    GROUP BY name, email
+    HAVING COUNT(*) > 1
+)
+AND ROWID NOT IN (  -- ROWID 是 MySQL 隐式的行标识符（若表无主键）
+    SELECT MIN(ROWID)
+    FROM users
+    GROUP BY name, email
+);
+```
+
+
+
+**注意**：
+
+
+
+- 若表有主键，将 `ROWID` 替换为实际主键列（如 `id`）。
+- 若无主键，部分 MySQL 版本可能需要先添加临时主键。
+
+### **方法 3：创建临时表（适用于复杂场景或需保留数据备份）**
+
+sql
+
+
+
+
+
+
+
+
+
+
+
+```sql
+-- 创建临时表，仅插入不重复的数据
+CREATE TABLE temp_users AS
+SELECT DISTINCT * 
+FROM users;
+
+-- 删除原表，重命名临时表
+DROP TABLE users;
+ALTER TABLE temp_users RENAME TO users;
+```
+
+
+
+**优点**：简单直接，避免复杂的 `DELETE` 逻辑。
+**缺点**：需临时存储空间，可能影响数据完整性（如索引、外键）。
+
+### **方法 4：使用窗口函数（MySQL 8.0+）**
+
+sql
+
+
+
+
+
+
+
+
+
+
+
+```sql
+WITH ranked AS (
+    SELECT *,
+           ROW_NUMBER() OVER (PARTITION BY email ORDER BY id) AS rn
+    FROM users
+)
+DELETE FROM users
+WHERE id IN (SELECT id FROM ranked WHERE rn > 1);
+```
+
+
+
+**解释**：
+
+
+
+- 通过 `ROW_NUMBER()` 为每个 `email` 分组内的记录分配行号（按 `id` 排序）。
+- 删除行号大于 1 的记录（即重复行）。
+
+### **注意事项**
+
+1. **备份数据**：执行删除前务必备份表数据，避免误操作。
+
+2. 唯一索引
+
+   ：删除重复数据后，可添加唯一索引防止再次出现重复：
+
+   sql
+
+
+
+
+
+
+
+
+
+
+
+   ```sql
+   ALTER TABLE users ADD UNIQUE (email);
+   ```
+
+
+
+
+
+![img](data:image/png;base64,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)
+
+3. **性能考虑**：大表删除操作可能耗时较长，建议在低峰期执行。
+
+### **示例表结构和数据**
+
+sql
+
+
+
+
+
+
+
+
+
+
+
+```sql
+CREATE TABLE users (
+    id INT PRIMARY KEY,
+    name VARCHAR(50),
+    email VARCHAR(50)
+);
+
+INSERT INTO users VALUES
+(1, 'Alice', 'alice@example.com'),
+(2, 'Bob', 'bob@example.com'),
+(3, 'Charlie', 'alice@example.com');  -- 重复 email
+
+-- 删除重复后的数据应保留 id=1 和 id=2 的记录
+```
+
+
+
+
+
+
+
+
+根据实际表结构和需求选择合适的方法，推荐优先使用方法 1（简单高效）或方法 4（功能强大）。
