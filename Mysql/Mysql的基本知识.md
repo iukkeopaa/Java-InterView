@@ -879,3 +879,54 @@ MyISAM 不?持事务，?的是表锁，查询快但写?性能差，适合读多写少的场景。
 ### InnoDB 的 Buffer Pool
 
 ![img_1.png](img_1.png)
+
+## MySql查询不区分大小问题遇到过么，如何解决方案？
+
+
+**解决方案一：**
+
+修改数据库字符排序匹配规则(从MySQL 8.0.1版本开始，支持_cs（case sensitive collation）排序规则。在此版本之前，MySQL仅支持_bin（binary collation）排序规则，它是区分大小写的)
+
+*_bin: 表示的是binary case sensitive collation，也就是说是区分大小写的
+*_cs: case sensitive collation，区分大小写
+*_ci: case insensitive collation，不区分大小写字符匹配规则
+
+**解决方案二:**
+
+使用关键字BINARY修饰
+
+mysql查询默认是不区分大小写的 如:
+
+```
+select * from 表名 where 字段名 ='aaa';
+```
+
+
+
+与
+
+```
+select * from 表名 where 字段名 ='Aaa';
+```
+
+
+
+查询结果相同
+
+解决方式(使用关键字BINARY 修饰)
+
+```
+select * from 表名 where BINARY 字段名 ='aaa';
+```
+
+
+
+原理:
+
+对于CHAR、VARCHAR和TEXT类型，BINARY属性可以为列分配该列字符集的 校对规则。BINARY属性是指定列字符集的二元 校对规则的简写。排序和比较基于数值字符值。因此也就自然区分了大小写。
+
+**解决办法三:**
+
+使用varbinary数据类型
+
+数据库中varchar字符串类型是不区分大小写查询的,将varchar改为varbinary类型,再次查询就会使查询的字段区分查询条件大小写
