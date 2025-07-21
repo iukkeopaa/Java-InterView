@@ -1,10 +1,8 @@
 package org.github.wqz.other;
 
-import java.util.HashMap;
-import java.util.Map;
-
 public class _2 {
-
+    private import java.util.HashMap;
+import java.util.Map;
 
     class Solution {
         private static final Map<Character, Integer> DIGIT_MAP = new HashMap<>();
