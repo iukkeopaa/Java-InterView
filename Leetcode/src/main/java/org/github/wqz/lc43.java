@@ -1,13 +1,7 @@
 package org.github.wqz;
 
-/**
- * @Description:
- * @Author: wjh
- * @Date: 2025/7/20 17:32
- */
 public class lc43 {
 
-    class Solution {
         public String multiply(String num1, String num2) {
             if (num1.equals("0") || num2.equals("0")) {
                 return "0";
@@ -50,4 +44,4 @@ public class lc43 {
             return sb.toString();
         }
     }
-}
+
