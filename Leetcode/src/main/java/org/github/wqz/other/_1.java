@@ -33,7 +33,7 @@ public class _1 {
                 num /= 10000;
                 groupIndex++;
             }
-//
+
 //            // 处理特殊情况：一十X → 十X
 //            if (result.startsWith("一十")) {
 //                result.deleteCharAt(0);
