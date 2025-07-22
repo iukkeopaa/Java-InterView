@@ -1848,3 +1848,31 @@ CREATE TABLE users (
    操作前预留回滚通道（如保留原表备份、主从切换前记录原主库信息），一旦出现问题可快速切回。
 4. **监控主从延迟**：
    从库变更期间需实时监控主从延迟，若延迟过大，可暂停迁移任务，优先让从库追平主库。
+
+
+## Mysql中的死锁处理
+
+死锁是指两个或多个事务在执行过程中，因争夺锁资源而造成的一种互相等待的现象。可以通过以下方法来处理死锁：
+
+
+
+- 采用合适的事务隔离级别，例如将隔离级别设为 `READ COMMITTED`。
+- 让事务按相同的顺序来访问资源。
+- 缩短事务的执行时间，减少持有锁的时长。
+- 为锁设置超时时间，当等待锁的时间超过设定的阈值时，事务自动回滚。
+
+
+```sql
+
+-- 事务 T1
+BEGIN;
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+UPDATE accounts SET balance = balance + 100 WHERE id = 2;
+COMMIT;
+
+-- 事务 T2（并行执行）
+BEGIN;
+UPDATE accounts SET balance = balance - 200 WHERE id = 2;
+UPDATE accounts SET balance = balance + 200 WHERE id = 1;
+COMMIT;
+```
