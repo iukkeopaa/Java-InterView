@@ -7,7 +7,6 @@
         <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
         <outputRelativeToContentRoot value="true" />
         <module name="Leetcode" />
-        <module name="Study" />
       </profile>
       <profile name="Annotation profile for damai" enabled="true">
         <sourceOutputDir name="target/generated-sources/annotations" />
@@ -21,6 +20,7 @@
     </annotationProcessing>
     <bytecodeTargetLevel>
       <module name="Code" target="1.8" />
+      <module name="Study" target="1.8" />
     </bytecodeTargetLevel>
   </component>
   <component name="JavacSettings">
