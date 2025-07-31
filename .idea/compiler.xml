@@ -15,11 +15,11 @@
         <processorPath useClasspath="false">
           <entry name="$MAVEN_REPOSITORY$/org/projectlombok/lombok/1.18.38/lombok-1.18.38.jar" />
         </processorPath>
-        <module name="damai" />
       </profile>
     </annotationProcessing>
     <bytecodeTargetLevel>
       <module name="Code" target="1.8" />
+      <module name="damai" target="17" />
       <module name="Study" target="1.8" />
     </bytecodeTargetLevel>
   </component>
