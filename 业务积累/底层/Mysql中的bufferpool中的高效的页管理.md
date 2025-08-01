@@ -29,7 +29,7 @@ InnoDB´æ´¢ÒıÇæÒıÈëÁËÒ»¸ö³ÆÎª¡°ÊÊÓ¦ĞÔ¹şÏ£Ë÷Òı¡±£¨Adaptive Hash Index£©µÄÓÅ»¯¼¼Êõ¡
 
 
 
-![img.png](img.png)
+![img.png](InnoDBµ×²ãÊµÏÖ.png)
 
 ### Ò»¡¢ÄÚ´æ½á¹¹£¨In-Memory Structures£©
 
