@@ -8,14 +8,6 @@
         <outputRelativeToContentRoot value="true" />
         <module name="Leetcode" />
       </profile>
-      <profile name="Annotation profile for damai" enabled="true">
-        <sourceOutputDir name="target/generated-sources/annotations" />
-        <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
-        <outputRelativeToContentRoot value="true" />
-        <processorPath useClasspath="false">
-          <entry name="$MAVEN_REPOSITORY$/org/projectlombok/lombok/1.18.38/lombok-1.18.38.jar" />
-        </processorPath>
-      </profile>
     </annotationProcessing>
     <bytecodeTargetLevel>
       <module name="Code" target="1.8" />
